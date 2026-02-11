@@ -20,9 +20,6 @@
       "@libs/contracts/*": [
         "./libs/contract/*"
       ],
-      "@xray-protos/*": [
-        "./src/xray-protos/*"
-      ]
     },
     "incremental": true,
     "skipLibCheck": true,

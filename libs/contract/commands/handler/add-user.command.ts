@@ -2,51 +2,23 @@ import { z } from 'zod';
 
 import { REST_API } from '../../api';
 
-export enum CipherType {
-    AES_128_GCM = 5,
-    AES_256_GCM = 6,
-    CHACHA20_POLY1305 = 7,
-    NONE = 9,
-    UNKNOWN = 0,
-    UNRECOGNIZED = -1,
-    XCHACHA20_POLY1305 = 8,
-}
-
 export namespace AddUserCommand {
     export const url = REST_API.HANDLER.ADD_USER;
 
-    const BaseTrojanUser = z.object({
-        type: z.literal('trojan'),
+    /**
+     * TrustTunnel user model: each user has a username and password.
+     * The 'type' field is kept as 'trusttunnel' for compatibility with the panel contract.
+     * The 'tag' field maps to the inbound tag on the panel side.
+     */
+    const TrustTunnelUser = z.object({
+        type: z.string().default('trusttunnel'),
         tag: z.string(),
         username: z.string(),
         password: z.string(),
-    });
-
-    const BaseVlessUser = z.object({
-        type: z.literal('vless'),
-        tag: z.string(),
-        username: z.string(),
-        uuid: z.string(),
-        flow: z.enum(['xtls-rprx-vision', '']),
-    });
-
-    const BaseShadowsocksUser = z.object({
-        type: z.literal('shadowsocks'),
-        tag: z.string(),
-        username: z.string(),
-        password: z.string(),
-        cipherType: z.nativeEnum(CipherType),
-        ivCheck: z.boolean(),
     });
 
     export const RequestSchema = z.object({
-        data: z.array(
-            z.discriminatedUnion('type', [BaseTrojanUser, BaseVlessUser, BaseShadowsocksUser]),
-        ),
-        hashData: z.object({
-            vlessUuid: z.string().uuid(),
-            prevVlessUuid: z.optional(z.string().uuid()),
-        }),
+        data: z.array(TrustTunnelUser),
     });
 
     export type Request = z.infer<typeof RequestSchema>;

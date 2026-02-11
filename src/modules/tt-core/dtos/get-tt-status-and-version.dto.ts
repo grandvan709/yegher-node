@@ -2,6 +2,6 @@ import { createZodDto } from 'nestjs-zod';
 
 import { GetStatusAndVersionCommand } from '@libs/contracts/commands';
 
-export class GetXrayStatusAndVersionResponseDto extends createZodDto(
+export class GetTtStatusAndVersionResponseDto extends createZodDto(
     GetStatusAndVersionCommand.ResponseSchema,
 ) {}

@@ -1,25 +1,20 @@
 import { utilities as nestWinstonModuleUtilities, WinstonModule } from 'nest-winston';
 import * as bodyParser from '@kastov/body-parser-with-zstd';
 import { ZodValidationPipe } from 'nestjs-zod';
-import express, { json } from 'express';
 import { createLogger } from 'winston';
 import compression from 'compression';
 import * as winston from 'winston';
-import { Server } from 'https';
-import * as fs from 'node:fs';
 import helmet from 'helmet';
 import morgan from 'morgan';
 
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 
-import { initializeMTLSCerts } from '@common/utils/generate-mtls-certs';
 import { parseNodePayload } from '@common/utils/decode-node-payload';
 import { getStartMessage } from '@common/utils/get-start-message';
 import { isDevelopment } from '@common/utils/is-development';
 import { NotFoundExceptionFilter } from '@common/exception';
 import { customLogFilter } from '@common/utils/filter-logs';
-import { XRAY_INTERNAL_FULL_PATH } from '@libs/contracts/constants';
 import { REST_API, ROOT } from '@libs/contracts/api';
 
 import { AppModule } from './app.module';
@@ -32,7 +27,6 @@ const logger = createLogger({
             format: 'YYYY-MM-DD HH:mm:ss.SSS',
         }),
         winston.format.align(),
-        // winston.format.ms(),
         nestWinstonModuleUtilities.format.nestLike('', {
             colors: true,
             prettyPrint: true,
@@ -44,14 +38,6 @@ const logger = createLogger({
 });
 
 async function bootstrap(): Promise<void> {
-    const internalSocketPath = process.env.INTERNAL_SOCKET_PATH!;
-
-    if (fs.existsSync(internalSocketPath)) {
-        fs.unlinkSync(internalSocketPath);
-    }
-
-    await initializeMTLSCerts();
-
     const nodePayload = parseNodePayload();
 
     const app = await NestFactory.create(AppModule, {
@@ -74,15 +60,11 @@ async function bootstrap(): Promise<void> {
         }),
     );
 
-    const nodeHttpServer: Server = app.getHttpServer();
+    const nodeHttpServer = app.getHttpServer();
     nodeHttpServer.keepAliveTimeout = 60_000;
     nodeHttpServer.headersTimeout = 61_000;
 
-    // app.use(json({ limit: '1000mb' }));
-
     app.use(compression());
-
-    const config = app.get(ConfigService);
 
     app.use(helmet());
 
@@ -94,7 +76,6 @@ async function bootstrap(): Promise<void> {
 
     app.setGlobalPrefix(ROOT, {
         exclude: [
-            XRAY_INTERNAL_FULL_PATH,
             '/' + REST_API.VISION.BLOCK_IP,
             '/' + REST_API.VISION.UNBLOCK_IP,
         ],
@@ -102,48 +83,16 @@ async function bootstrap(): Promise<void> {
 
     app.useGlobalPipes(new ZodValidationPipe());
 
+    const config = app.get(ConfigService);
+
     await app.listen(Number(config.getOrThrow<string>('NODE_PORT')));
 
-    const httpAdapter = app.getHttpAdapter();
-    const httpServer = httpAdapter.getInstance();
-
-    const internalApp = express();
-    internalApp.use(json({ limit: '1000mb' }));
-
-    // '/' + REST_API.VISION.BLOCK_IP, '/' + REST_API.VISION.UNBLOCK_IP
-    internalApp.use([XRAY_INTERNAL_FULL_PATH], (req, res, next) => {
-        req.url = req.originalUrl;
-
-        httpServer.handle(req, res, next);
-    });
-
-    const internalServer = internalApp.listen(internalSocketPath);
-
-    let internalServerClosed = false;
-
-    const closeInternalServer = () => {
-        if (internalServerClosed) return;
-        internalServerClosed = true;
-
-        internalServer.close(() => {
-            if (fs.existsSync(internalSocketPath)) {
-                fs.unlinkSync(internalSocketPath);
-            }
-
-            logger.info('Shutting down...');
-        });
-    };
-
     app.enableShutdownHooks();
-
-    process.on('SIGINT', closeInternalServer);
-    process.on('SIGTERM', closeInternalServer);
 
     logger.info(
         '\n' +
             (await getStartMessage(
                 Number(config.getOrThrow<string>('NODE_PORT')),
-
                 app,
             )) +
             '\n',

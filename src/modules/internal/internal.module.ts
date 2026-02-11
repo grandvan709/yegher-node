@@ -1,13 +1,4 @@
-import {
-    Global,
-    Logger,
-    MiddlewareConsumer,
-    Module,
-    NestModule,
-    OnApplicationShutdown,
-} from '@nestjs/common';
-
-import { TokenAuthMiddleware } from '@common/middlewares';
+import { Global, Logger, Module, OnApplicationShutdown } from '@nestjs/common';
 
 import { InternalController } from './internal.controller';
 import { InternalService } from './internal.service';
@@ -19,10 +10,7 @@ import { InternalService } from './internal.service';
     controllers: [InternalController],
     exports: [InternalService],
 })
-export class InternalModule implements NestModule, OnApplicationShutdown {
-    configure(consumer: MiddlewareConsumer) {
-        consumer.apply(TokenAuthMiddleware).forRoutes(InternalController);
-    }
+export class InternalModule implements OnApplicationShutdown {
     private readonly logger = new Logger(InternalModule.name);
 
     async onApplicationShutdown(signal?: string): Promise<void> {

@@ -1,7 +1,7 @@
 {
-  "name": "@remnawave/node-contract",
-  "version": "2.5.0",
-  "description": "A node-contract library for Remnawave Panel",
+  "name": "@yegher/node-contract",
+  "version": "0.1.0",
+  "description": "A node-contract library for Yegher Panel",
   "main": "build/index.js",
   "types": "build/index.d.ts",
   "files": [
@@ -12,14 +12,14 @@
     "build": "tsc"
   },
   "keywords": [],
-  "author": "Remnawave",
-  "homepage": "https://github.com/remnawave",
+  "author": "Yegher",
+  "homepage": "https://github.com/grandvan709/yegher-node",
   "repository": {
     "type": "git",
-    "url": "https://github.com/remnawave/node"
+    "url": "https://github.com/grandvan709/yegher-node"
   },
   "bugs": {
-    "url": "https://github.com/remnawave/node/issues"
+    "url": "https://github.com/grandvan709/yegher-node/issues"
   },
   "license": "AGPL-3.0-only",
   "dependencies": {

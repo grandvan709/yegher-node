@@ -1,4 +1,4 @@
-export class GetXrayStatusAndVersionResponseModel {
+export class GetTtStatusAndVersionResponseModel {
     public isRunning: boolean;
     public version: null | string;
 

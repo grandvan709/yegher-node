@@ -3,15 +3,15 @@ import ems from 'enhanced-ms';
 
 import { Injectable, Logger } from '@nestjs/common';
 
-import { StartXrayCommand } from '@libs/contracts/commands';
+import { StartTtCommand } from '@libs/contracts/commands';
 
 /**
  * Internal service adapted for TrustTunnel.
  *
- * Instead of tracking Xray inbound hash maps, we maintain a simple
+ * Instead of tracking inbound hash maps, we maintain a simple
  * user registry (username → hashUuid) and a config hash for change detection.
  *
- * The `extractUsersFromXrayConfig` method parses the Xray JSON config
+ * The `extractUsersFromTtConfig` method parses the config
  * that the panel sends and extracts user credentials for TrustTunnel.
  */
 @Injectable()
@@ -29,13 +29,13 @@ export class InternalService {
     constructor() {}
 
     /**
-     * Extract users from the Xray JSON config that the panel sends.
-     * The panel sends a full Xray config with inbounds containing clients.
+     * Extract users from the config that the panel sends.
+     * The panel sends a config with inbounds containing clients.
      * We extract username + uuid/password for TrustTunnel.
      */
-    public extractUsersFromXrayConfig(
-        hashes: StartXrayCommand.Request['internals']['hashes'],
-        xrayConfig: Record<string, unknown>,
+    public extractUsersFromTtConfig(
+        hashes: StartTtCommand.Request['internals']['hashes'],
+        ttConfig: Record<string, unknown>,
     ): Array<{ username: string; password: string }> {
         this.cleanup();
 
@@ -47,15 +47,15 @@ export class InternalService {
             this.inboundHashes.set(inbound.tag, inbound.hash);
         }
 
-        if (xrayConfig.inbounds && Array.isArray(xrayConfig.inbounds)) {
-            for (const inbound of xrayConfig.inbounds) {
+        if (ttConfig.inbounds && Array.isArray(ttConfig.inbounds)) {
+            for (const inbound of ttConfig.inbounds) {
                 if (
                     inbound.settings &&
                     inbound.settings.clients &&
                     Array.isArray(inbound.settings.clients)
                 ) {
                     for (const client of inbound.settings.clients) {
-                        // Xray clients have: id (uuid for vless), password (for trojan/ss), email
+                        // TrustTunnel clients have: username and password
                         const username = client.email || client.id || '';
                         const password = client.id || client.password || '';
 
@@ -85,10 +85,10 @@ export class InternalService {
 
     /**
      * Check if TrustTunnel needs a restart based on config hash changes.
-     * Mirrors the logic from the original Remnawave Node.
+     * Mirrors the logic from the original node implementation.
      */
     public isNeedRestart(
-        incomingHashes: StartXrayCommand.Request['internals']['hashes'],
+        incomingHashes: StartTtCommand.Request['internals']['hashes'],
     ): boolean {
         const start = performance.now();
         try {

@@ -5,9 +5,9 @@ export const ERRORS = {
     FORBIDDEN_ROLE_ERROR: { code: 'A004', message: 'Forbidden role error', httpCode: 403 },
     CREATE_API_TOKEN_ERROR: { code: 'A005', message: 'Create API token error', httpCode: 500 },
     DELETE_API_TOKEN_ERROR: { code: 'A006', message: 'Delete API token error', httpCode: 500 },
-    GET_XRAY_STATS_ERROR: {
+    GET_TT_STATS_ERROR: {
         code: 'A009',
-        message: 'Get Xray stats error',
+        message: 'Get TrustTunnel stats error',
         httpCode: 500,
     },
     FAILED_TO_GET_SYSTEM_STATS: {

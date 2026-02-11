@@ -1,12 +1,14 @@
 import { z } from 'zod';
 
 import { REST_API } from '../../api';
-export namespace StopXrayCommand {
-    export const url = REST_API.XRAY.STOP;
+
+export namespace GetStatusAndVersionCommand {
+    export const url = REST_API.TT.STATUS;
 
     export const ResponseSchema = z.object({
         response: z.object({
-            isStopped: z.boolean(),
+            isRunning: z.boolean(),
+            version: z.string().nullable(),
         }),
     });
 

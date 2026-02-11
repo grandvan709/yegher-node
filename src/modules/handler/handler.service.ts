@@ -25,7 +25,7 @@ import { InternalService } from '../internal/internal.service';
  *
  * TrustTunnel has a simpler user model: just username + password.
  * There are no inbound tags, no protocol variants (vless/trojan/ss).
- * We extract the relevant data from the Xray-style requests the panel sends
+ * We extract the relevant data from the requests the panel sends
  * and translate them into TT Wrapper API calls.
  */
 @Injectable()
@@ -39,7 +39,7 @@ export class HandlerService {
 
     public async addUser(data: AddUserRequestDto): Promise<ICommandResponse<AddUserResponseModel>> {
         try {
-            const { data: requestData, hashData } = data;
+            const { data: requestData } = data;
 
             // Extract username and password from the first item
             // TrustTunnel uses a single user entry (no per-inbound distinction)
@@ -52,8 +52,7 @@ export class HandlerService {
             }
 
             const username = firstItem.username;
-            // Use vlessUuid as password for TrustTunnel (unique per user)
-            const password = hashData.vlessUuid;
+            const password = firstItem.password;
 
             this.logger.debug(`Adding user: ${username} to TrustTunnel`);
 
@@ -72,7 +71,7 @@ export class HandlerService {
             }
 
             // Track user in internal service
-            this.internalService.addUser(username, hashData.vlessUuid);
+            this.internalService.addUser(username, password);
 
             return {
                 isOk: true,
@@ -139,8 +138,8 @@ export class HandlerService {
 
             // Prepare batch: extract username and password for each user
             const ttUsers = users.map((user) => ({
-                username: user.userData.userId,
-                password: user.userData.vlessUuid,
+                username: user.userData.username,
+                password: user.userData.password,
             }));
 
             // Remove existing users first
@@ -162,7 +161,7 @@ export class HandlerService {
 
             // Track all users
             for (const user of users) {
-                this.internalService.addUser(user.userData.userId, user.userData.vlessUuid);
+                this.internalService.addUser(user.userData.username, user.userData.password);
             }
 
             return {

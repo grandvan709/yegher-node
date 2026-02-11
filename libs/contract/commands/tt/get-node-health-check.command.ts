@@ -3,13 +3,13 @@ import { z } from 'zod';
 import { REST_API } from '../../api';
 
 export namespace GetNodeHealthCheckCommand {
-    export const url = REST_API.XRAY.NODE_HEALTH_CHECK;
+    export const url = REST_API.TT.NODE_HEALTH_CHECK;
 
     export const ResponseSchema = z.object({
         response: z.object({
             isAlive: z.boolean(),
-            xrayInternalStatusCached: z.boolean(),
-            xrayVersion: z.string().nullable(),
+            ttInternalStatusCached: z.boolean(),
+            ttVersion: z.string().nullable(),
             nodeVersion: z.string(),
         }),
     });

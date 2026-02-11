@@ -22,7 +22,7 @@ import { IGetUserOnlineStatusRequest } from './interfaces';
  *
  * TrustTunnel exposes Prometheus metrics (inbound/outbound bytes, sessions).
  * It does NOT provide per-user traffic stats — only aggregated totals.
- * We map these to the Xray-style response format the panel expects.
+ * We map these to the response format the panel expects.
  *
  * Key differences:
  * - No per-user uplink/downlink (getUsersStats returns empty)
@@ -73,7 +73,7 @@ export class StatsService {
                 };
             }
 
-            // Map TrustTunnel metrics to Xray-style system stats
+            // Map TrustTunnel metrics to system stats
             // These are synthetic values since TT doesn't expose Go runtime stats
             return {
                 isOk: true,

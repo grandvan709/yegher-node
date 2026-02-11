@@ -1,6 +1,6 @@
 import { ISystemStats } from '@common/utils/get-system-stats/get-system-stats.interface';
 
-export class StartXrayResponseModel {
+export class StartTtResponseModel {
     public isStarted: boolean;
     public version: null | string;
     public error: null | string;

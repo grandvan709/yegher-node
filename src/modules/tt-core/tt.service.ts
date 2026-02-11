@@ -10,13 +10,13 @@ import { TtWrapperClient } from '@common/tt-wrapper';
 import { ISystemStats } from '@common/utils/get-system-stats/get-system-stats.interface';
 import { ICommandResponse } from '@common/types/command-response.type';
 import { getSystemStats } from '@common/utils/get-system-stats';
-import { StartXrayCommand } from '@libs/contracts/commands';
+import { StartTtCommand } from '@libs/contracts/commands';
 
 import {
     GetNodeHealthCheckResponseModel,
-    GetXrayStatusAndVersionResponseModel,
-    StartXrayResponseModel,
-    StopXrayResponseModel,
+    GetTtStatusAndVersionResponseModel,
+    StartTtResponseModel,
+    StopTtResponseModel,
 } from './models';
 import { InternalService } from '../internal/internal.service';
 
@@ -54,15 +54,15 @@ export class TtService implements OnApplicationBootstrap {
     /**
      * Start TrustTunnel via TT Wrapper.
      *
-     * The panel sends `StartXrayCommand.Request` with `xrayConfig` and `internals`.
-     * We extract users from the Xray config, push them to TT Wrapper, and start TT.
+     * The panel sends `StartTtCommand.Request` with `ttConfig` and `internals`.
+     * We extract users from the config, push them to TT Wrapper, and start TT.
      *
-     * The response shape is identical to what the panel expects from Remnawave Node.
+     * The response shape is identical to what the panel expects.
      */
     public async startTt(
-        body: StartXrayCommand.Request,
+        body: StartTtCommand.Request,
         ip: string,
-    ): Promise<ICommandResponse<StartXrayResponseModel>> {
+    ): Promise<ICommandResponse<StartTtResponseModel>> {
         const tm = performance.now();
 
         try {
@@ -70,7 +70,7 @@ export class TtService implements OnApplicationBootstrap {
                 this.logger.warn('Request already in progress');
                 return {
                     isOk: true,
-                    response: new StartXrayResponseModel(
+                    response: new StartTtResponseModel(
                         false,
                         this.ttVersion,
                         'Request already in progress',
@@ -99,7 +99,7 @@ export class TtService implements OnApplicationBootstrap {
                 if (!shouldRestart) {
                     return {
                         isOk: true,
-                        response: new StartXrayResponseModel(
+                        response: new StartTtResponseModel(
                             true,
                             this.ttVersion,
                             null,
@@ -114,10 +114,10 @@ export class TtService implements OnApplicationBootstrap {
                 this.logger.warn('Force restart requested');
             }
 
-            // Extract users from the Xray config that the panel sends
-            const users = this.internalService.extractUsersFromXrayConfig(
+            // Extract users from the config that the panel sends
+            const users = this.internalService.extractUsersFromTtConfig(
                 body.internals.hashes,
-                body.xrayConfig,
+                body.ttConfig,
             );
 
             this.logger.log(`Extracted ${users.length} users from panel config`);
@@ -132,7 +132,7 @@ export class TtService implements OnApplicationBootstrap {
                 this.logger.error(`Failed to restart TrustTunnel: ${restartResult.message}`);
                 return {
                     isOk: true,
-                    response: new StartXrayResponseModel(
+                    response: new StartTtResponseModel(
                         false,
                         this.ttVersion,
                         restartResult.message || 'Failed to restart TrustTunnel',
@@ -167,7 +167,7 @@ export class TtService implements OnApplicationBootstrap {
 
                 return {
                     isOk: true,
-                    response: new StartXrayResponseModel(
+                    response: new StartTtResponseModel(
                         false,
                         this.ttVersion,
                         'TrustTunnel process not running after restart',
@@ -198,7 +198,7 @@ export class TtService implements OnApplicationBootstrap {
 
             return {
                 isOk: true,
-                response: new StartXrayResponseModel(
+                response: new StartTtResponseModel(
                     true,
                     this.ttVersion,
                     null,
@@ -215,7 +215,7 @@ export class TtService implements OnApplicationBootstrap {
 
             return {
                 isOk: true,
-                response: new StartXrayResponseModel(false, null, errorMessage, null, {
+                response: new StartTtResponseModel(false, null, errorMessage, null, {
                     version: this.nodeVersion,
                 }),
             };
@@ -231,7 +231,7 @@ export class TtService implements OnApplicationBootstrap {
         }
     }
 
-    public async stopTt(): Promise<ICommandResponse<StopXrayResponseModel>> {
+    public async stopTt(): Promise<ICommandResponse<StopTtResponseModel>> {
         try {
             await this.ttClient.stop();
             this.isTtOnline = false;
@@ -239,19 +239,19 @@ export class TtService implements OnApplicationBootstrap {
 
             return {
                 isOk: true,
-                response: new StopXrayResponseModel(true),
+                response: new StopTtResponseModel(true),
             };
         } catch (error) {
             this.logger.error(`Failed to stop TrustTunnel: ${error}`);
             return {
                 isOk: true,
-                response: new StopXrayResponseModel(false),
+                response: new StopTtResponseModel(false),
             };
         }
     }
 
     public async getStatusAndVersion(): Promise<
-        ICommandResponse<GetXrayStatusAndVersionResponseModel>
+        ICommandResponse<GetTtStatusAndVersionResponseModel>
     > {
         try {
             const status = await this.ttClient.getStatus();
@@ -259,13 +259,13 @@ export class TtService implements OnApplicationBootstrap {
 
             return {
                 isOk: true,
-                response: new GetXrayStatusAndVersionResponseModel(isRunning, this.ttVersion),
+                response: new GetTtStatusAndVersionResponseModel(isRunning, this.ttVersion),
             };
         } catch (error) {
             this.logger.error(`Failed to get TT status: ${error}`);
             return {
                 isOk: true,
-                response: new GetXrayStatusAndVersionResponseModel(false, null),
+                response: new GetTtStatusAndVersionResponseModel(false, null),
             };
         }
     }

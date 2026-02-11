@@ -1,4 +1,4 @@
-export class StopXrayResponseModel {
+export class StopTtResponseModel {
     public isStopped: boolean;
 
     constructor(isStopped: boolean) {

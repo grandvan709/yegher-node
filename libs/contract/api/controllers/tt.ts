@@ -1,6 +1,6 @@
-export const XRAY_CONTROLLER = 'xray' as const;
+export const TT_CONTROLLER = 'tt' as const;
 
-export const XRAY_ROUTES = {
+export const TT_ROUTES = {
     START: 'start',
     STOP: 'stop',
     STATUS: 'status',

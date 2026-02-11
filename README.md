@@ -1,6 +1,6 @@
 # Yegher Node
 
-**Yegher Node** is a VPN node agent that manages the [TrustTunnel](https://github.com/TrustTunnel/TrustTunnel) protocol via the [TT Wrapper](https://github.com/grandvan709/yegher-tt-wrapper) REST API. It is designed to be a drop-in replacement for [Remnawave Node](https://github.com/remnawave/node), maintaining full API compatibility with the Yegher control panel while using TrustTunnel instead of Xray-core.
+**Yegher Node** is a VPN node agent that manages the [TrustTunnel](https://github.com/TrustTunnel/TrustTunnel) protocol via the [TT Wrapper](https://github.com/grandvan709/yegher-tt-wrapper) REST API. It serves as the node component of the Yegher VPN platform, providing full API compatibility with the Yegher control panel.
 
 ## Architecture
 
@@ -16,15 +16,15 @@
                                                      └──────────────┘
 ```
 
-## Key Differences from Remnawave Node
+## Key Features
 
-| Aspect | Remnawave Node | Yegher Node |
-|--------|---------------|-------------|
-| VPN engine | Xray-core (gRPC API) | TrustTunnel (via TT Wrapper REST API) |
-| Protocol support | VLESS, VMess, Trojan, Shadowsocks | TrustTunnel protocol |
-| Process management | Supervisord | TT Wrapper (direct process control) |
-| User model | Per-inbound, per-protocol | Single user type (username + password) |
-| Stats | Per-user traffic via Xray gRPC | Aggregated metrics via Prometheus |
+| Feature | Description |
+|---------|-------------|
+| VPN engine | TrustTunnel (via TT Wrapper REST API) |
+| Protocol | TrustTunnel protocol by AdGuard |
+| Process management | TT Wrapper (direct process control) |
+| User model | Single user type (username + password) |
+| Stats | Aggregated metrics via Prometheus |
 
 ## Environment Variables
 
@@ -60,7 +60,7 @@ npm run start:dev
 
 ## API Compatibility
 
-Yegher Node exposes the exact same REST API as Remnawave Node, so the control panel requires no modifications to communicate with it.
+Yegher Node exposes a REST API that the Yegher Panel uses to manage TrustTunnel nodes, users, and collect statistics.
 
 ## License
 

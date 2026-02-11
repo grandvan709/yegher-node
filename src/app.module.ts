@@ -8,7 +8,7 @@ import { validateEnvConfig } from '@common/utils/validate-env-config';
 import { configSchema, Env } from '@common/config/app-config';
 import { getJWTConfig } from '@common/config/jwt/jwt.config';
 
-import { YegherNodeModules } from './modules/remnawave-node.modules';
+import { YegherNodeModules } from './modules/yegher-node.modules';
 import { InternalModule } from './modules/internal/internal.module';
 
 @Module({

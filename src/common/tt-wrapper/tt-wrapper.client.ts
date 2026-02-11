@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 
 /**
  * HTTP client for communicating with the Yegher TT Wrapper REST API.
- * Replaces the Xray gRPC SDK (xtls-sdk) used in Remnawave Node.
+ * HTTP client for TT Wrapper API.
  */
 @Injectable()
 export class TtWrapperClient implements OnModuleInit {

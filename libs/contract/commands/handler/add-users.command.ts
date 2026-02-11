@@ -5,40 +5,25 @@ import { REST_API } from '../../api';
 export namespace AddUsersCommand {
     export const url = REST_API.HANDLER.ADD_USERS;
 
-    const BaseTrojanUser = z.object({
-        type: z.literal('trojan'),
-        tag: z.string(),
-    });
-
-    const BaseVlessUser = z.object({
-        type: z.literal('vless'),
-        tag: z.string(),
-        flow: z.enum(['xtls-rprx-vision', '']),
-    });
-
-    const BaseShadowsocksUser = z.object({
-        type: z.literal('shadowsocks'),
-        tag: z.string(),
-    });
-
+    /**
+     * TrustTunnel batch add users.
+     * Each user has a username and password.
+     */
     export const RequestSchema = z.object({
         affectedInboundTags: z.array(z.string()),
         users: z.array(
             z.object({
                 inboundData: z.array(
-                    z.discriminatedUnion('type', [
-                        BaseTrojanUser,
-                        BaseVlessUser,
-                        BaseShadowsocksUser,
-                    ]),
+                    z.object({
+                        type: z.string().default('trusttunnel'),
+                        tag: z.string(),
+                    }),
                 ),
 
                 userData: z.object({
                     userId: z.string(),
-                    hashUuid: z.string().uuid(),
-                    vlessUuid: z.string().uuid(),
-                    trojanPassword: z.string(),
-                    ssPassword: z.string(),
+                    username: z.string(),
+                    password: z.string(),
                 }),
             }),
         ),
