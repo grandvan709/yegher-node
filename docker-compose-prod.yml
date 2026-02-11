@@ -1,14 +1,29 @@
 services:
-  remnanode:
-    image: remnawave/node:latest
-    container_name: remnanode
-    hostname: remnanode
+  yegher-node:
+    image: ghcr.io/grandvan709/yegher-node:latest
+    container_name: yegher-node
+    hostname: yegher-node
     network_mode: host
     restart: always
     ulimits:
       nofile:
         soft: 1048576
         hard: 1048576
+    env_file:
+      - .env
     environment:
-      - NODE_PORT=2222
-      - SECRET_KEY=""
+      - NODE_ENV=production
+
+  tt-wrapper:
+    image: ghcr.io/grandvan709/yegher-tt-wrapper:latest
+    container_name: tt-wrapper
+    hostname: tt-wrapper
+    network_mode: host
+    restart: always
+    env_file:
+      - .env.tt-wrapper
+    volumes:
+      - tt-data:/etc/trusttunnel
+
+volumes:
+  tt-data:

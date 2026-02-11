@@ -11,11 +11,12 @@ export class InternalController {
     constructor(private readonly internalService: InternalService) {}
 
     @Get(XRAY_INTERNAL_API_PATH)
-    public async getXrayConfig(): Promise<Record<string, unknown>> {
+    public async getConfig(): Promise<Record<string, unknown>> {
         try {
-            const config = await this.internalService.getXrayConfig();
-
-            return config;
+            return {
+                engine: 'trusttunnel',
+                users: this.internalService.getUserCount(),
+            };
         } catch {
             return {};
         }

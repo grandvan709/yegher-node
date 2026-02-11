@@ -3,28 +3,27 @@ import { readPackageJSON } from 'pkg-types';
 
 import { INestApplication } from '@nestjs/common';
 
-import { XrayService } from '../../modules/xray-core/xray.service';
-import { getXtlsApiPort } from './get-initial-ports';
+import { TtService } from '../../modules/tt-core/tt.service';
 
 export async function getStartMessage(appPort: number, app: INestApplication) {
     const pkg = await readPackageJSON();
 
-    const xrayService = app.get(XrayService);
+    const ttService = app.get(TtService);
 
-    const xrayInfo = xrayService.getXrayInfo();
+    const ttInfo = ttService.getTtInfo();
 
     return table(
         [
-            ['Docs → https://docs.rw\nCommunity → https://t.me/remnawave'],
-            [`API Port: ${appPort}\nInternal Ports: ${getXtlsApiPort()}`],
-            [`XRay Core: v${xrayInfo.version || 'N/A'}\nXRay Path: ${xrayInfo.path}`],
+            ['Yegher Node — TrustTunnel VPN'],
+            [`API Port: ${appPort}`],
+            [`TrustTunnel: ${ttInfo.version || 'N/A'}`],
             [
-                `SI: ${xrayInfo.systemInfo?.cpuCores}C, ${xrayInfo.systemInfo?.cpuModel}, ${xrayInfo.systemInfo?.memoryTotal}`,
+                `SI: ${ttInfo.systemInfo?.cpuCores}C, ${ttInfo.systemInfo?.cpuModel}, ${ttInfo.systemInfo?.memoryTotal}`,
             ],
         ],
         {
             header: {
-                content: `Remnawave Node v${pkg.version}`,
+                content: `Yegher Node v${pkg.version}`,
                 alignment: 'center',
             },
             columnDefault: {

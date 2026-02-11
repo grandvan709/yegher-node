@@ -1,40 +1,29 @@
-import objectHash from 'object-hash';
-
 import { Injectable, Logger } from '@nestjs/common';
 
-import { InjectXtls } from '@remnawave/xtls-sdk-nestjs';
-import { XtlsApi } from '@remnawave/xtls-sdk';
-
 import { ICommandResponse } from '@common/types/command-response.type';
-import { ERRORS } from '@libs/contracts/constants/errors';
 
 import { BlockIpResponseModel, UnblockIpResponseModel } from './models';
 import { BlockIpRequestDto, UnblockIpRequestDto } from './dtos';
 
+/**
+ * Vision service adapted for TrustTunnel.
+ *
+ * TrustTunnel does not support dynamic IP blocking/unblocking via API.
+ * These methods return success stubs to maintain API compatibility
+ * with the panel. IP-level blocking can be handled at the firewall level.
+ */
 @Injectable()
 export class VisionService {
     private readonly logger = new Logger(VisionService.name);
 
-    constructor(@InjectXtls() private readonly xtlsApi: XtlsApi) {}
+    constructor() {}
 
     public async blockIp(dto: BlockIpRequestDto): Promise<ICommandResponse<BlockIpResponseModel>> {
         try {
             const { ip } = dto;
-
-            const ipHash = this.getIpHash(ip);
-
-            const res = await this.xtlsApi.router.addSrcIpRule({
-                ruleTag: ipHash,
-                outbound: 'BLOCK',
-                append: true,
-                ip: ip,
-            });
-
-            this.logger.log(res);
-
-            if (!res.isOk) {
-                throw new Error(res.message);
-            }
+            this.logger.warn(
+                `IP blocking not supported by TrustTunnel. Ignoring block request for: ${ip}`,
+            );
 
             return {
                 isOk: true,
@@ -48,7 +37,6 @@ export class VisionService {
             }
             return {
                 isOk: false,
-                code: ERRORS.INTERNAL_SERVER_ERROR.code,
                 response: new BlockIpResponseModel(false, message),
             };
         }
@@ -59,18 +47,9 @@ export class VisionService {
     ): Promise<ICommandResponse<UnblockIpResponseModel>> {
         try {
             const { ip } = dto;
-
-            const ipHash = this.getIpHash(ip);
-
-            const res = await this.xtlsApi.router.removeRuleByRuleTag({
-                ruleTag: ipHash,
-            });
-
-            this.logger.log(res);
-
-            if (!res.isOk) {
-                throw new Error(res.message);
-            }
+            this.logger.warn(
+                `IP unblocking not supported by TrustTunnel. Ignoring unblock request for: ${ip}`,
+            );
 
             return {
                 isOk: true,
@@ -84,13 +63,8 @@ export class VisionService {
             }
             return {
                 isOk: false,
-                code: ERRORS.INTERNAL_SERVER_ERROR.code,
                 response: new UnblockIpResponseModel(false, message),
             };
         }
-    }
-
-    private getIpHash(ip: string): string {
-        return objectHash(ip, { algorithm: 'md5', encoding: 'hex' });
     }
 }

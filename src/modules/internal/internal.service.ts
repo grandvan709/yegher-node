@@ -1,85 +1,73 @@
 import { getSemaphore } from '@henrygd/semaphore';
 import ems from 'enhanced-ms';
-import pMap from 'p-map';
 
 import { Injectable, Logger } from '@nestjs/common';
 
-import { HashedSet } from '@remnawave/hashed-set';
-
 import { StartXrayCommand } from '@libs/contracts/commands';
 
+/**
+ * Internal service adapted for TrustTunnel.
+ *
+ * Instead of tracking Xray inbound hash maps, we maintain a simple
+ * user registry (username → hashUuid) and a config hash for change detection.
+ *
+ * The `extractUsersFromXrayConfig` method parses the Xray JSON config
+ * that the panel sends and extracts user credentials for TrustTunnel.
+ */
 @Injectable()
 export class InternalService {
     private readonly logger = new Logger(InternalService.name);
     private readonly mutex = getSemaphore();
 
-    private xrayConfig: null | Record<string, unknown> = null;
-    private emptyConfigHash: null | string = null;
-    private inboundsHashMap: Map<string, HashedSet> = new Map();
-    private xtlsConfigInbounds: Set<string> = new Set();
+    // Simple user tracking: username → hashUuid
+    private usersMap: Map<string, string> = new Map();
+
+    // Config hash for change detection
+    private configHash: string | null = null;
+    private inboundHashes: Map<string, string> = new Map();
 
     constructor() {}
 
-    public async getXrayConfig(): Promise<Record<string, unknown>> {
-        if (!this.xrayConfig) {
-            return {};
-        }
-
-        return this.xrayConfig;
-    }
-
-    public setXrayConfig(config: Record<string, unknown>): void {
-        this.xrayConfig = config;
-    }
-
-    public async extractUsersFromConfig(
+    /**
+     * Extract users from the Xray JSON config that the panel sends.
+     * The panel sends a full Xray config with inbounds containing clients.
+     * We extract username + uuid/password for TrustTunnel.
+     */
+    public extractUsersFromXrayConfig(
         hashes: StartXrayCommand.Request['internals']['hashes'],
-        newConfig: Record<string, unknown>,
-    ): Promise<void> {
+        xrayConfig: Record<string, unknown>,
+    ): Array<{ username: string; password: string }> {
         this.cleanup();
 
-        this.emptyConfigHash = hashes.emptyConfig;
-        this.xrayConfig = newConfig;
-
-        this.logger.log(
-            `Starting user extraction from inbounds... Hash payload: ${JSON.stringify(hashes)}`,
-        );
-
         const start = performance.now();
-        if (newConfig.inbounds && Array.isArray(newConfig.inbounds)) {
-            const validTags = new Set(hashes.inbounds.map((item) => item.tag));
+        const users: Array<{ username: string; password: string }> = [];
 
-            await pMap(
-                newConfig.inbounds,
-                async (inbound) => {
-                    const inboundTag: string = inbound.tag;
+        this.configHash = hashes.emptyConfig;
+        for (const inbound of hashes.inbounds) {
+            this.inboundHashes.set(inbound.tag, inbound.hash);
+        }
 
-                    if (!inboundTag || !validTags.has(inboundTag)) {
-                        return;
-                    }
+        if (xrayConfig.inbounds && Array.isArray(xrayConfig.inbounds)) {
+            for (const inbound of xrayConfig.inbounds) {
+                if (
+                    inbound.settings &&
+                    inbound.settings.clients &&
+                    Array.isArray(inbound.settings.clients)
+                ) {
+                    for (const client of inbound.settings.clients) {
+                        // Xray clients have: id (uuid for vless), password (for trojan/ss), email
+                        const username = client.email || client.id || '';
+                        const password = client.id || client.password || '';
 
-                    const usersSet = new HashedSet();
-
-                    if (
-                        inbound.settings &&
-                        inbound.settings.clients &&
-                        Array.isArray(inbound.settings.clients)
-                    ) {
-                        for (const client of inbound.settings.clients) {
-                            if (client.id) {
-                                usersSet.add(client.id);
+                        if (username && password) {
+                            // Avoid duplicates
+                            if (!this.usersMap.has(username)) {
+                                users.push({ username, password });
+                                this.usersMap.set(username, password);
                             }
                         }
                     }
-
-                    this.inboundsHashMap.set(inboundTag, usersSet);
-                },
-                { concurrency: 20 },
-            );
-
-            for (const [inboundTag, usersSet] of this.inboundsHashMap) {
-                this.xtlsConfigInbounds.add(inboundTag);
-                this.logger.log(`${inboundTag} has ${usersSet.size} users`);
+                }
             }
         }
 
@@ -88,53 +76,48 @@ export class InternalService {
             includeMs: true,
         });
 
-        this.logger.log(`User extraction completed in ${result ? result : '0ms'}`);
+        this.logger.log(
+            `User extraction completed in ${result ? result : '0ms'}: ${users.length} users`,
+        );
+
+        return users;
     }
 
-    public isNeedRestartCore(
+    /**
+     * Check if TrustTunnel needs a restart based on config hash changes.
+     * Mirrors the logic from the original Remnawave Node.
+     */
+    public isNeedRestart(
         incomingHashes: StartXrayCommand.Request['internals']['hashes'],
     ): boolean {
         const start = performance.now();
         try {
-            if (!this.emptyConfigHash) {
+            if (!this.configHash) {
                 return true;
             }
 
-            if (incomingHashes.emptyConfig !== this.emptyConfigHash) {
-                this.logger.warn('Detected changes in Xray Core base configuration');
+            if (incomingHashes.emptyConfig !== this.configHash) {
+                this.logger.warn('Detected changes in base configuration');
                 return true;
             }
 
-            if (incomingHashes.inbounds.length !== this.inboundsHashMap.size) {
-                this.logger.warn('Number of Xray Core inbounds has changed');
+            if (incomingHashes.inbounds.length !== this.inboundHashes.size) {
+                this.logger.warn('Number of inbounds has changed');
                 return true;
             }
 
-            for (const [inboundTag, usersSet] of this.inboundsHashMap) {
-                const incomingInbound = incomingHashes.inbounds.find(
-                    (item) => item.tag === inboundTag,
-                );
-
-                if (!incomingInbound) {
-                    this.logger.warn(
-                        `Inbound ${inboundTag} no longer exists in Xray Core configuration`,
-                    );
-                    return true;
-                }
-
-                if (usersSet.hash64String !== incomingInbound.hash) {
-                    this.logger.warn(
-                        `User configuration changed for inbound ${inboundTag} (${usersSet.hash64String} → ${incomingInbound.hash})`,
-                    );
+            for (const incoming of incomingHashes.inbounds) {
+                const currentHash = this.inboundHashes.get(incoming.tag);
+                if (!currentHash || currentHash !== incoming.hash) {
+                    this.logger.warn(`User configuration changed for inbound ${incoming.tag}`);
                     return true;
                 }
             }
 
-            this.logger.log('Xray Core configuration is up-to-date - no restart required');
-
+            this.logger.log('Configuration is up-to-date — no restart required');
             return false;
         } catch (error) {
-            this.logger.error(`Failed to check if Xray Core restart is needed: ${error}`);
+            this.logger.error(`Failed to check if restart is needed: ${error}`);
             return true;
         } finally {
             const result = ems(performance.now() - start, {
@@ -145,69 +128,30 @@ export class InternalService {
         }
     }
 
-    public async addUserToInbound(inboundTag: string, user: string): Promise<void> {
-        await this.mutex.acquire();
+    // ── User tracking ──────────────────────────────────────────────
 
-        try {
-            const usersSet = this.inboundsHashMap.get(inboundTag);
-
-            if (!usersSet) {
-                this.logger.warn(
-                    `Inbound ${inboundTag} not found in inboundsHashMap, creating new one`,
-                );
-
-                this.inboundsHashMap.set(inboundTag, new HashedSet([user]));
-
-                return;
-            }
-
-            usersSet.add(user);
-        } catch (error) {
-            this.logger.error(`Failed to add user to inbound ${inboundTag}: ${error}`);
-        } finally {
-            this.mutex.release();
-        }
+    public addUser(username: string, hashUuid: string): void {
+        this.usersMap.set(username, hashUuid);
     }
 
-    public async removeUserFromInbound(inboundTag: string, user: string): Promise<void> {
-        await this.mutex.acquire();
-
-        try {
-            const usersSet = this.inboundsHashMap.get(inboundTag);
-
-            if (!usersSet) {
-                return;
-            }
-
-            usersSet.delete(user);
-
-            if (usersSet.size === 0) {
-                this.xtlsConfigInbounds.delete(inboundTag);
-                this.inboundsHashMap.delete(inboundTag);
-
-                this.logger.warn(`Inbound ${inboundTag} has no users, clearing inboundsHashMap.`);
-            }
-        } catch (error) {
-            this.logger.error(`Failed to remove user from inbound ${inboundTag}: ${error}`);
-        } finally {
-            this.mutex.release();
-        }
+    public removeUser(username: string): void {
+        this.usersMap.delete(username);
     }
 
-    public getXtlsConfigInbounds(): Set<string> {
-        return this.xtlsConfigInbounds;
+    public getUserCount(): number {
+        return this.usersMap.size;
     }
 
-    public addXtlsConfigInbound(inboundTag: string): void {
-        this.xtlsConfigInbounds.add(inboundTag);
+    public getUsers(): Map<string, string> {
+        return this.usersMap;
     }
+
+    // ── Cleanup ────────────────────────────────────────────────────
 
     public cleanup(): void {
         this.logger.log('Cleaning up internal service.');
-
-        this.inboundsHashMap.clear();
-        this.xtlsConfigInbounds.clear();
-        this.xrayConfig = null;
-        this.emptyConfigHash = null;
+        this.usersMap.clear();
+        this.configHash = null;
+        this.inboundHashes.clear();
     }
 }

@@ -1,5 +1,5 @@
 export interface IInboundUser {
-    level: number;
-    protocol: string;
+    level?: number;
+    protocol?: string;
     username: string;
 }

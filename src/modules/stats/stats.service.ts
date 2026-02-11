@@ -1,8 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-import { InjectXtls } from '@remnawave/xtls-sdk-nestjs';
-import { XtlsApi } from '@remnawave/xtls-sdk';
-
+import { TtWrapperClient } from '@common/tt-wrapper';
+import { parsePrometheusMetrics, TtMetrics } from '@common/tt-wrapper/metrics-parser';
 import { ICommandResponse } from '@common/types/command-response.type';
 import { ERRORS } from '@libs/contracts/constants';
 
@@ -18,27 +17,41 @@ import {
 } from './models';
 import { IGetUserOnlineStatusRequest } from './interfaces';
 
+/**
+ * Stats service adapted for TrustTunnel.
+ *
+ * TrustTunnel exposes Prometheus metrics (inbound/outbound bytes, sessions).
+ * It does NOT provide per-user traffic stats — only aggregated totals.
+ * We map these to the Xray-style response format the panel expects.
+ *
+ * Key differences:
+ * - No per-user uplink/downlink (getUsersStats returns empty)
+ * - No Go runtime stats (getSystemStats returns synthetic values)
+ * - Inbound/outbound stats come from Prometheus counters
+ * - User online status based on client_sessions > 0
+ */
 @Injectable()
 export class StatsService {
-    constructor(@InjectXtls() private readonly xtlsSdk: XtlsApi) {}
     private readonly logger = new Logger(StatsService.name);
+
+    // Track previous metric values for delta calculation (reset support)
+    private previousMetrics: TtMetrics | null = null;
+    private lastMetrics: TtMetrics | null = null;
+
+    constructor(private readonly ttClient: TtWrapperClient) {}
 
     public async getUserOnlineStatus(
         body: IGetUserOnlineStatusRequest,
     ): Promise<ICommandResponse<GetUserOnlineStatusResponseModel>> {
         try {
-            const response = await this.xtlsSdk.stats.getUserOnlineStatus(body.username);
-
-            if (response.isOk && response.data) {
-                return {
-                    isOk: true,
-                    response: new GetUserOnlineStatusResponseModel(response.data.online),
-                };
-            }
+            // TrustTunnel doesn't track per-user online status.
+            // We can only tell if there are any active sessions.
+            const metrics = await this.fetchMetrics();
+            const isOnline = metrics ? metrics.clientSessions > 0 : false;
 
             return {
                 isOk: true,
-                response: new GetUserOnlineStatusResponseModel(false),
+                response: new GetUserOnlineStatusResponseModel(isOnline),
             };
         } catch (error) {
             this.logger.error(error);
@@ -51,19 +64,31 @@ export class StatsService {
 
     public async getSystemStats(): Promise<ICommandResponse<GetSystemStatsResponseModel>> {
         try {
-            const response = await this.xtlsSdk.stats.getSysStats();
+            const metrics = await this.fetchMetrics();
 
-            if (!response.isOk || !response.data) {
-                this.logger.warn(response);
+            if (!metrics) {
                 return {
                     isOk: false,
                     ...ERRORS.FAILED_TO_GET_SYSTEM_STATS,
                 };
             }
 
+            // Map TrustTunnel metrics to Xray-style system stats
+            // These are synthetic values since TT doesn't expose Go runtime stats
             return {
                 isOk: true,
-                response: new GetSystemStatsResponseModel(response.data),
+                response: new GetSystemStatsResponseModel({
+                    numGoroutine: metrics.outboundTcpSockets + metrics.outboundUdpSockets,
+                    numGC: 0,
+                    alloc: 0,
+                    totalAlloc: metrics.inboundTrafficBytes + metrics.outboundTrafficBytes,
+                    sys: 0,
+                    mallocs: 0,
+                    frees: 0,
+                    liveObjects: metrics.clientSessions,
+                    pauseTotalNs: 0,
+                    uptime: 0,
+                }),
             };
         } catch (error) {
             this.logger.error(error);
@@ -78,34 +103,12 @@ export class StatsService {
         reset: boolean,
     ): Promise<ICommandResponse<GetUsersStatsResponseModel>> {
         try {
-            const response = await this.xtlsSdk.stats.getAllUsersStats(reset);
-
-            if (!response.isOk || !response.data) {
-                this.logger.warn(response);
-
-                return {
-                    isOk: false,
-                    ...ERRORS.FAILED_TO_GET_USERS_STATS,
-                };
-            }
-
+            // TrustTunnel does NOT provide per-user traffic stats.
+            // Return empty array — the panel will handle this gracefully.
             return {
                 isOk: true,
-                response: new GetUsersStatsResponseModel(
-                    response.data.users.filter((user) => user.uplink !== 0 || user.downlink !== 0),
-                ),
+                response: new GetUsersStatsResponseModel([]),
             };
-
-            // const demoRes = Array.from({ length: 160_000 }, (_, i) => ({
-            //     username: String(i + 1),
-            //     uplink: Math.floor(Math.random() * (107374182400 - 10485760) + 10485760), // Random between 10MB and 100GB
-            //     downlink: Math.floor(Math.random() * (107374182400 - 10485760) + 10485760), // Random between 10MB and 100GB
-            // }));
-
-            // return {
-            //     isOk: true,
-            //     response: new GetUsersStatsResponseModel(demoRes),
-            // };
         } catch (error) {
             this.logger.error(error);
             return {
@@ -120,9 +123,9 @@ export class StatsService {
         reset: boolean,
     ): Promise<ICommandResponse<GetInboundStatsResponseModel>> {
         try {
-            const response = await this.xtlsSdk.stats.getInboundStats(tag, reset);
+            const metrics = await this.getMetricsWithReset(reset);
 
-            if (!response.isOk || !response.data || !response.data.inbound) {
+            if (!metrics) {
                 return {
                     isOk: false,
                     ...ERRORS.FAILED_TO_GET_INBOUND_STATS,
@@ -132,9 +135,9 @@ export class StatsService {
             return {
                 isOk: true,
                 response: new GetInboundStatsResponseModel({
-                    inbound: response.data.inbound.inbound,
-                    downlink: response.data.inbound.downlink,
-                    uplink: response.data.inbound.uplink,
+                    inbound: tag || 'trusttunnel-inbound',
+                    downlink: metrics.inboundTrafficBytes,
+                    uplink: metrics.outboundTrafficBytes,
                 }),
             };
         } catch (error) {
@@ -151,9 +154,9 @@ export class StatsService {
         reset: boolean,
     ): Promise<ICommandResponse<GetOutboundStatsResponseModel>> {
         try {
-            const response = await this.xtlsSdk.stats.getOutboundStats(tag, reset);
+            const metrics = await this.getMetricsWithReset(reset);
 
-            if (!response.isOk || !response.data || !response.data.outbound) {
+            if (!metrics) {
                 return {
                     isOk: false,
                     ...ERRORS.FAILED_TO_GET_OUTBOUND_STATS,
@@ -163,9 +166,9 @@ export class StatsService {
             return {
                 isOk: true,
                 response: new GetOutboundStatsResponseModel({
-                    outbound: response.data.outbound.outbound,
-                    downlink: response.data.outbound.downlink,
-                    uplink: response.data.outbound.uplink,
+                    outbound: tag || 'trusttunnel-outbound',
+                    downlink: metrics.outboundTrafficBytes,
+                    uplink: metrics.inboundTrafficBytes,
                 }),
             };
         } catch (error) {
@@ -181,18 +184,25 @@ export class StatsService {
         reset: boolean,
     ): Promise<ICommandResponse<GetAllInboundsStatsResponseModel>> {
         try {
-            const response = await this.xtlsSdk.stats.getAllInboundsStats(reset);
+            const metrics = await this.getMetricsWithReset(reset);
 
-            if (!response.isOk || !response.data) {
+            if (!metrics) {
                 return {
                     isOk: false,
                     ...ERRORS.FAILED_TO_GET_INBOUNDS_STATS,
                 };
             }
 
+            // TrustTunnel has a single "inbound" — the TT endpoint
             return {
                 isOk: true,
-                response: new GetAllInboundsStatsResponseModel(response.data.inbounds),
+                response: new GetAllInboundsStatsResponseModel([
+                    {
+                        inbound: 'trusttunnel-inbound',
+                        downlink: metrics.inboundTrafficBytes,
+                        uplink: metrics.outboundTrafficBytes,
+                    },
+                ]),
             };
         } catch (error) {
             this.logger.error(error);
@@ -207,10 +217,9 @@ export class StatsService {
         reset: boolean,
     ): Promise<ICommandResponse<GetAllOutboundsStatsResponseModel>> {
         try {
-            const response = await this.xtlsSdk.stats.getAllOutboundsStats(reset);
+            const metrics = await this.getMetricsWithReset(reset);
 
-            if (!response.isOk || !response.data) {
-                this.logger.error(response);
+            if (!metrics) {
                 return {
                     isOk: false,
                     ...ERRORS.FAILED_TO_GET_OUTBOUNDS_STATS,
@@ -219,13 +228,19 @@ export class StatsService {
 
             return {
                 isOk: true,
-                response: new GetAllOutboundsStatsResponseModel(response.data.outbounds),
+                response: new GetAllOutboundsStatsResponseModel([
+                    {
+                        outbound: 'trusttunnel-outbound',
+                        downlink: metrics.outboundTrafficBytes,
+                        uplink: metrics.inboundTrafficBytes,
+                    },
+                ]),
             };
         } catch (error) {
             this.logger.error(error);
             return {
                 isOk: false,
-                ...ERRORS.FAILED_TO_GET_INBOUNDS_STATS,
+                ...ERRORS.FAILED_TO_GET_OUTBOUNDS_STATS,
             };
         }
     }
@@ -234,12 +249,9 @@ export class StatsService {
         reset: boolean,
     ): Promise<ICommandResponse<GetCombinedStatsResponseModel>> {
         try {
-            const { isOk: isOkInbounds, data: inboundsData } =
-                await this.xtlsSdk.stats.getAllInboundsStats(reset);
-            const { isOk: isOkOutbounds, data: outboundsData } =
-                await this.xtlsSdk.stats.getAllOutboundsStats(reset);
+            const metrics = await this.getMetricsWithReset(reset);
 
-            if (!isOkInbounds || !inboundsData || !isOkOutbounds || !outboundsData) {
+            if (!metrics) {
                 return {
                     isOk: false,
                     ...ERRORS.FAILED_TO_GET_COMBINED_STATS,
@@ -249,8 +261,20 @@ export class StatsService {
             return {
                 isOk: true,
                 response: new GetCombinedStatsResponseModel(
-                    inboundsData.inbounds,
-                    outboundsData.outbounds,
+                    [
+                        {
+                            inbound: 'trusttunnel-inbound',
+                            downlink: metrics.inboundTrafficBytes,
+                            uplink: metrics.outboundTrafficBytes,
+                        },
+                    ],
+                    [
+                        {
+                            outbound: 'trusttunnel-outbound',
+                            downlink: metrics.outboundTrafficBytes,
+                            uplink: metrics.inboundTrafficBytes,
+                        },
+                    ],
                 ),
             };
         } catch (error) {
@@ -260,5 +284,41 @@ export class StatsService {
                 ...ERRORS.FAILED_TO_GET_COMBINED_STATS,
             };
         }
+    }
+
+    // ── Private helpers ────────────────────────────────────────────
+
+    private async fetchMetrics(): Promise<TtMetrics | null> {
+        const raw = await this.ttClient.getMetrics();
+        if (!raw) return null;
+        const metrics = parsePrometheusMetrics(raw);
+        this.lastMetrics = metrics;
+        return metrics;
+    }
+
+    private async getMetricsWithReset(reset: boolean): Promise<TtMetrics | null> {
+        const current = await this.fetchMetrics();
+        if (!current) return null;
+
+        if (reset && this.previousMetrics) {
+            // Return delta since last reset
+            const delta: TtMetrics = {
+                clientSessions: current.clientSessions,
+                inboundTrafficBytes:
+                    current.inboundTrafficBytes - this.previousMetrics.inboundTrafficBytes,
+                outboundTrafficBytes:
+                    current.outboundTrafficBytes - this.previousMetrics.outboundTrafficBytes,
+                outboundTcpSockets: current.outboundTcpSockets,
+                outboundUdpSockets: current.outboundUdpSockets,
+            };
+            this.previousMetrics = current;
+            return delta;
+        }
+
+        if (reset) {
+            this.previousMetrics = current;
+        }
+
+        return current;
     }
 }

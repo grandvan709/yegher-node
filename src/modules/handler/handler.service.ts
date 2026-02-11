@@ -2,17 +2,9 @@ import ems from 'enhanced-ms';
 
 import { Injectable, Logger } from '@nestjs/common';
 
-import {
-    RemoveUserResponseModel as RemoveUserResponseModelFromSdk,
-    AddUserResponseModel as AddUserResponseModelFromSdk,
-} from '@remnawave/xtls-sdk/build/src/handler/models';
-import { ISdkResponse } from '@remnawave/xtls-sdk/build/src/common/types';
-import { InjectXtls } from '@remnawave/xtls-sdk-nestjs';
-import { XtlsApi } from '@remnawave/xtls-sdk';
-
+import { TtWrapperClient } from '@common/tt-wrapper';
 import { ICommandResponse } from '@common/types/command-response.type';
 import { ERRORS } from '@libs/contracts/constants/errors';
-import { CipherType } from '@libs/contracts/commands';
 
 import {
     GetInboundUsersCountResponseModel,
@@ -28,103 +20,59 @@ import {
 } from './dtos';
 import { InternalService } from '../internal/internal.service';
 
+/**
+ * Handler service adapted for TrustTunnel.
+ *
+ * TrustTunnel has a simpler user model: just username + password.
+ * There are no inbound tags, no protocol variants (vless/trojan/ss).
+ * We extract the relevant data from the Xray-style requests the panel sends
+ * and translate them into TT Wrapper API calls.
+ */
 @Injectable()
 export class HandlerService {
     private readonly logger = new Logger(HandlerService.name);
 
     constructor(
-        @InjectXtls() private readonly xtlsApi: XtlsApi,
+        private readonly ttClient: TtWrapperClient,
         private readonly internalService: InternalService,
     ) {}
 
     public async addUser(data: AddUserRequestDto): Promise<ICommandResponse<AddUserResponseModel>> {
         try {
             const { data: requestData, hashData } = data;
-            const response: Array<ISdkResponse<AddUserResponseModelFromSdk>> = [];
 
-            for (const item of requestData) {
-                this.internalService.addXtlsConfigInbound(item.tag);
-            }
-
-            for (const tag of this.internalService.getXtlsConfigInbounds()) {
-                this.logger.debug(`Removing user: ${requestData[0].username} from tag: ${tag}`);
-
-                await this.xtlsApi.handler.removeUser(tag, requestData[0].username);
-
-                if (hashData.prevVlessUuid) {
-                    await this.internalService.removeUserFromInbound(tag, hashData.prevVlessUuid);
-                } else {
-                    await this.internalService.removeUserFromInbound(tag, hashData.vlessUuid);
-                }
-            }
-
-            for (const item of requestData) {
-                let tempRes = null;
-
-                this.logger.debug(`Adding user: ${item.username} with type: ${item.type}`);
-
-                switch (item.type) {
-                    case 'trojan':
-                        tempRes = await this.xtlsApi.handler.addTrojanUser({
-                            tag: item.tag,
-                            username: item.username,
-                            password: item.password,
-                            level: 0,
-                        });
-                        if (tempRes.isOk) {
-                            await this.internalService.addUserToInbound(
-                                item.tag,
-                                hashData.vlessUuid,
-                            );
-                        }
-                        response.push(tempRes);
-                        break;
-                    case 'vless':
-                        tempRes = await this.xtlsApi.handler.addVlessUser({
-                            tag: item.tag,
-                            username: item.username,
-                            uuid: item.uuid,
-                            flow: item.flow,
-                            level: 0,
-                        });
-                        if (tempRes.isOk) {
-                            await this.internalService.addUserToInbound(
-                                item.tag,
-                                hashData.vlessUuid,
-                            );
-                        }
-                        response.push(tempRes);
-                        break;
-                    case 'shadowsocks':
-                        tempRes = await this.xtlsApi.handler.addShadowsocksUser({
-                            tag: item.tag,
-                            username: item.username,
-                            password: item.password,
-                            cipherType: item.cipherType,
-                            ivCheck: item.ivCheck,
-                            level: 0,
-                        });
-                        if (tempRes.isOk) {
-                            await this.internalService.addUserToInbound(
-                                item.tag,
-                                hashData.vlessUuid,
-                            );
-                        }
-                        response.push(tempRes);
-                        break;
-                }
-            }
-
-            if (response.every((res) => !res.isOk)) {
-                this.logger.error('Error adding users: ' + JSON.stringify(response, null, 2));
+            // Extract username and password from the first item
+            // TrustTunnel uses a single user entry (no per-inbound distinction)
+            const firstItem = requestData[0];
+            if (!firstItem) {
                 return {
                     isOk: true,
-                    response: new AddUserResponseModel(
-                        false,
-                        response.find((res) => !res.isOk)?.message ?? null,
-                    ),
+                    response: new AddUserResponseModel(false, 'No user data provided'),
                 };
             }
+
+            const username = firstItem.username;
+            // Use vlessUuid as password for TrustTunnel (unique per user)
+            const password = hashData.vlessUuid;
+
+            this.logger.debug(`Adding user: ${username} to TrustTunnel`);
+
+            // Remove user first (idempotent)
+            await this.ttClient.removeUser(username);
+
+            // Add user
+            const result = await this.ttClient.addUser(username, password);
+
+            if (!result.success) {
+                this.logger.error(`Error adding user: ${result.message}`);
+                return {
+                    isOk: true,
+                    response: new AddUserResponseModel(false, result.message || null),
+                };
+            }
+
+            // Track user in internal service
+            this.internalService.addUser(username, hashData.vlessUuid);
 
             return {
                 isOk: true,
@@ -148,36 +96,18 @@ export class HandlerService {
         data: RemoveUserRequestDto,
     ): Promise<ICommandResponse<RemoveUserResponseModel>> {
         try {
-            const { username, hashData } = data;
-            const response: Array<ISdkResponse<RemoveUserResponseModelFromSdk>> = [];
+            const { username } = data;
 
-            const inboundTags = this.internalService.getXtlsConfigInbounds();
+            this.logger.debug(`Removing user: ${username} from TrustTunnel`);
 
-            if (inboundTags.size === 0) {
-                return {
-                    isOk: true,
-                    response: new RemoveUserResponseModel(true, null),
-                };
-            }
+            const result = await this.ttClient.removeUser(username);
 
-            for (const tag of inboundTags) {
-                this.logger.debug(`Removing user: ${username} from tag: ${tag}`);
+            // Track removal
+            this.internalService.removeUser(username);
 
-                const tempRes = await this.xtlsApi.handler.removeUser(tag, username);
-
-                await this.internalService.removeUserFromInbound(tag, hashData.vlessUuid);
-                response.push(tempRes);
-            }
-
-            if (response.every((res) => !res.isOk)) {
-                this.logger.error(JSON.stringify(response, null, 2));
-                return {
-                    isOk: true,
-                    response: new RemoveUserResponseModel(
-                        false,
-                        response.find((res) => !res.isOk)?.message ?? null,
-                    ),
-                };
+            if (!result.success) {
+                // User might not exist — that's OK
+                this.logger.warn(`Remove user ${username}: ${result.message}`);
             }
 
             return {
@@ -203,75 +133,36 @@ export class HandlerService {
     ): Promise<ICommandResponse<AddUserResponseModel>> {
         const tm = performance.now();
         try {
-            const { affectedInboundTags, users } = data;
+            const { users } = data;
 
-            for (const tag of affectedInboundTags) {
-                this.internalService.addXtlsConfigInbound(tag);
+            this.logger.log(`Adding ${users.length} users to TrustTunnel`);
+
+            // Prepare batch: extract username and password for each user
+            const ttUsers = users.map((user) => ({
+                username: user.userData.userId,
+                password: user.userData.vlessUuid,
+            }));
+
+            // Remove existing users first
+            const usernamesToRemove = ttUsers.map((u) => u.username);
+            if (usernamesToRemove.length > 0) {
+                await this.ttClient.removeUsersBatch(usernamesToRemove);
             }
 
-            this.logger.log(
-                `Adding ${users.length} users to inbounds: ${affectedInboundTags.join(', ')}`,
-            );
+            // Add batch
+            const result = await this.ttClient.addUsersBatch(ttUsers);
 
+            if (!result.success) {
+                this.logger.error(`Batch add failed: ${result.message}`);
+                return {
+                    isOk: true,
+                    response: new AddUserResponseModel(false, result.message || null),
+                };
+            }
+
+            // Track all users
             for (const user of users) {
-                for (const tag of this.internalService.getXtlsConfigInbounds()) {
-                    await this.xtlsApi.handler.removeUser(tag, user.userData.userId);
-
-                    await this.internalService.removeUserFromInbound(tag, user.userData.hashUuid);
-                }
-
-                for (const item of user.inboundData) {
-                    let tempRes = null;
-
-                    switch (item.type) {
-                        case 'trojan':
-                            tempRes = await this.xtlsApi.handler.addTrojanUser({
-                                tag: item.tag,
-                                username: user.userData.userId,
-                                password: user.userData.trojanPassword,
-                                level: 0,
-                            });
-                            if (tempRes.isOk) {
-                                await this.internalService.addUserToInbound(
-                                    item.tag,
-                                    user.userData.vlessUuid,
-                                );
-                            }
-
-                            break;
-                        case 'vless':
-                            tempRes = await this.xtlsApi.handler.addVlessUser({
-                                tag: item.tag,
-                                username: user.userData.userId,
-                                uuid: user.userData.vlessUuid,
-                                flow: item.flow,
-                                level: 0,
-                            });
-                            if (tempRes.isOk) {
-                                await this.internalService.addUserToInbound(
-                                    item.tag,
-                                    user.userData.vlessUuid,
-                                );
-                            }
-                            break;
-                        case 'shadowsocks':
-                            tempRes = await this.xtlsApi.handler.addShadowsocksUser({
-                                tag: item.tag,
-                                username: user.userData.userId,
-                                password: user.userData.ssPassword,
-                                cipherType: CipherType.CHACHA20_POLY1305,
-                                ivCheck: false,
-                                level: 0,
-                            });
-                            if (tempRes.isOk) {
-                                await this.internalService.addUserToInbound(
-                                    item.tag,
-                                    user.userData.vlessUuid,
-                                );
-                            }
-                            break;
-                    }
-                }
+                this.internalService.addUser(user.userData.userId, user.userData.vlessUuid);
             }
 
             return {
@@ -290,13 +181,11 @@ export class HandlerService {
                 response: new AddUserResponseModel(false, message),
             };
         } finally {
-            this.logger.log(
-                'Users addition took: ' +
-                    ems(performance.now() - tm, {
-                        extends: 'short',
-                        includeMs: true,
-                    }),
-            );
+            const result = ems(performance.now() - tm, {
+                extends: 'short',
+                includeMs: true,
+            });
+            this.logger.log(`Batch add users completed in ${result ? result : '0ms'}`);
         }
     }
 
@@ -305,50 +194,26 @@ export class HandlerService {
     ): Promise<ICommandResponse<RemoveUserResponseModel>> {
         const tm = performance.now();
         try {
-            const inboundTags = this.internalService.getXtlsConfigInbounds();
+            const { users } = data;
 
-            if (inboundTags.size === 0) {
-                return {
-                    isOk: true,
-                    response: new RemoveUserResponseModel(true, null),
-                };
+            this.logger.log(`Removing ${users.length} users from TrustTunnel`);
+
+            const usernames = users.map((u) => u.userId);
+
+            if (usernames.length > 0) {
+                await this.ttClient.removeUsersBatch(usernames);
             }
 
-            this.logger.log(
-                `Removing ${data.users.length} users from inbounds: ${Array.from(inboundTags).join(', ')}`,
-            );
-
-            const removeUsersResponse: Array<ISdkResponse<RemoveUserResponseModelFromSdk>> = [];
-
-            for (const user of data.users) {
-                const { userId, hashUuid } = user;
-
-                for (const tag of inboundTags) {
-                    this.logger.debug(`Removing user: ${userId} from tag: ${tag}`);
-
-                    const tempRes = await this.xtlsApi.handler.removeUser(tag, userId);
-
-                    await this.internalService.removeUserFromInbound(tag, hashUuid);
-                    removeUsersResponse.push(tempRes);
-                }
-            }
-
-            if (removeUsersResponse.every((res) => !res.isOk)) {
-                this.logger.error(JSON.stringify(removeUsersResponse, null, 2));
-                return {
-                    isOk: true,
-                    response: new RemoveUserResponseModel(
-                        false,
-                        removeUsersResponse.find((res) => !res.isOk)?.message ?? null,
-                    ),
-                };
+            // Track removals
+            for (const username of usernames) {
+                this.internalService.removeUser(username);
             }
 
             return {
                 isOk: true,
                 response: new RemoveUserResponseModel(true, null),
             };
-        } catch (error: unknown) {
+        } catch (error) {
             this.logger.error(error);
             let message = '';
             if (error instanceof Error) {
@@ -360,69 +225,54 @@ export class HandlerService {
                 response: new RemoveUserResponseModel(false, message),
             };
         } finally {
-            this.logger.log(
-                'Users removal took: ' +
-                    ems(performance.now() - tm, {
-                        extends: 'short',
-                        includeMs: true,
-                    }),
-            );
-        }
-    }
-
-    public async getInboundUsers(
-        tag: string,
-    ): Promise<ICommandResponse<GetInboundUsersResponseModel>> {
-        try {
-            // TODO: add a better way to return users (trojan, vless, etc)
-            const response = await this.xtlsApi.handler.getInboundUsers(tag);
-
-            if (!response.isOk || !response.data) {
-                return {
-                    isOk: false,
-                    code: ERRORS.FAILED_TO_GET_INBOUND_USERS.code,
-                    response: new GetInboundUsersResponseModel([]),
-                };
-            }
-
-            return {
-                isOk: true,
-                response: new GetInboundUsersResponseModel(response.data.users),
-            };
-        } catch (error) {
-            this.logger.error(error);
-            return {
-                isOk: false,
-                code: ERRORS.FAILED_TO_GET_INBOUND_USERS.code,
-                response: new GetInboundUsersResponseModel([]),
-            };
+            const result = ems(performance.now() - tm, {
+                extends: 'short',
+                includeMs: true,
+            });
+            this.logger.log(`Batch remove users completed in ${result ? result : '0ms'}`);
         }
     }
 
     public async getInboundUsersCount(
-        tag: string,
+        _tag: string,
     ): Promise<ICommandResponse<GetInboundUsersCountResponseModel>> {
         try {
-            const response = await this.xtlsApi.handler.getInboundUsersCount(tag);
-
-            if (!response.isOk || !response.data) {
-                return {
-                    isOk: false,
-                    code: ERRORS.FAILED_TO_GET_INBOUND_USERS.code,
-                    response: new GetInboundUsersCountResponseModel(0),
-                };
-            }
-
+            // TrustTunnel has no inbound tags — return total user count
+            const count = this.internalService.getUserCount();
             return {
                 isOk: true,
-                response: new GetInboundUsersCountResponseModel(response.data),
+                response: new GetInboundUsersCountResponseModel(count),
             };
         } catch (error) {
             this.logger.error(error);
             return {
-                isOk: false,
-                code: ERRORS.FAILED_TO_GET_INBOUND_USERS.code,
+                isOk: true,
                 response: new GetInboundUsersCountResponseModel(0),
+            };
+        }
+    }
+
+    public async getInboundUsers(
+        _tag: string,
+    ): Promise<ICommandResponse<GetInboundUsersResponseModel>> {
+        try {
+            // Return all users from TT Wrapper
+            const result = await this.ttClient.listUsers();
+
+            const users =
+                result.success && result.data
+                    ? result.data.map((u) => ({ username: u.username }))
+                    : [];
+
+            return {
+                isOk: true,
+                response: new GetInboundUsersResponseModel(users),
+            };
+        } catch (error) {
+            this.logger.error(error);
+            return {
+                isOk: true,
+                response: new GetInboundUsersResponseModel([]),
             };
         }
     }
