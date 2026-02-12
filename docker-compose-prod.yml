@@ -1,6 +1,6 @@
 services:
   yegher-node:
-    image: ghcr.io/grandvan709/yegher-node:latest
+    image: grandvan/yegher-node:latest
     container_name: yegher-node
     hostname: yegher-node
     network_mode: host
@@ -15,9 +15,9 @@ services:
       - NODE_ENV=production
 
   tt-wrapper:
-    image: ghcr.io/grandvan709/yegher-tt-wrapper:latest
-    container_name: tt-wrapper
-    hostname: tt-wrapper
+    image: grandvan/yegher-tt-wrapper:latest
+    container_name: yegher-tt-wrapper
+    hostname: yegher-tt-wrapper
     network_mode: host
     restart: always
     env_file:
